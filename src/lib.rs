@@ -1,18 +1,9 @@
 use librypt_hash::{Hash, HashFn};
 
-pub struct Md5Hash {
-    bytes: [u8; 16],
-}
-
-impl AsRef<[u8; 16]> for Md5Hash {
-    fn as_ref(&self) -> &[u8; 16] {
-        &self.bytes
-    }
-}
-
-impl Hash<16> for Md5Hash {}
-
 /// MD5 hash function.
+///
+/// WARNING: MD5 is [cryptographically broken and should be avoided](https://www.kb.cert.org/vuls/id/836068).
+#[deprecated(note = "For legacy purposes only. See documentation for more information.")]
 pub struct Md5 {
     // MD5 hasher state
     a0: u32,
@@ -48,8 +39,6 @@ impl Md5 {
 }
 
 impl HashFn<64, 16> for Md5 {
-    type Output = Md5Hash;
-
     fn new() -> Self {
         Self {
             a0: Self::A0,
@@ -59,13 +48,44 @@ impl HashFn<64, 16> for Md5 {
         }
     }
 
-    fn update(&mut self, data: &[u8]) {}
+    /// TODO: Finish this function.
+    fn update(&mut self, data: &[u8]) {
+        // process complete 512-bit blocks
+        for chunk in data.windows(64) {
+            let mut A = self.a0;
+            let mut B = self.b0;
+            let mut C = self.c0;
+            let mut D = self.d0;
+        }
 
-    fn finalize(self) -> Self::Output {
-        todo!()
+        // process any leftover data
     }
 
-    fn finalize_reset(&mut self) -> Self::Output {
-        todo!()
+    fn finalize(self) -> Hash<16> {
+        let mut hash = [0u8; 16];
+
+        hash[0..4].copy_from_slice(&self.a0.to_le_bytes());
+        hash[4..8].copy_from_slice(&self.b0.to_le_bytes());
+        hash[8..12].copy_from_slice(&self.c0.to_le_bytes());
+        hash[12..16].copy_from_slice(&self.d0.to_le_bytes());
+
+        hash
+    }
+
+    fn finalize_reset(&mut self) -> Hash<16> {
+        let mut hash = [0u8; 16];
+
+        hash[0..4].copy_from_slice(&self.a0.to_le_bytes());
+        hash[4..8].copy_from_slice(&self.b0.to_le_bytes());
+        hash[8..12].copy_from_slice(&self.c0.to_le_bytes());
+        hash[12..16].copy_from_slice(&self.d0.to_le_bytes());
+
+        // reset state
+        self.a0 = Self::A0;
+        self.b0 = Self::B0;
+        self.c0 = Self::C0;
+        self.d0 = Self::D0;
+
+        hash
     }
 }
