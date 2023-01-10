@@ -5,3 +5,6 @@ edition = "2021"
 
 [dependencies]
 librypt-hash = { version = "0.1", git = "https://www.github.com/librypt/librypt-hash" }
+
+[dev-dependencies]
+hex = "0.4"

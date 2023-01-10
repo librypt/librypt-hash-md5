@@ -38,6 +38,52 @@ impl Md5 {
     pub const D0: u32 = 0x10325476;
 }
 
+impl Md5 {
+    /// Expects a chunk of exactly 512-bits (64 bytes).
+    fn compute(&mut self, chunk: &[u8; 64]) {
+        let mut A = self.a0;
+        let mut B = self.b0;
+        let mut C = self.c0;
+        let mut D = self.d0;
+
+        let mut words = [0u32; 16];
+
+        for (i, word) in chunk.chunks(4).enumerate() {
+            words[i] = u32::from_le_bytes(word.try_into().unwrap());
+        }
+
+        for i in 0..64 {
+            let mut f = 0u32;
+            let mut g = 0u32;
+
+            if 0 <= i && i <= 15 {
+                f = (B & C) | ((!B) & D);
+                g = i;
+            } else if 16 <= i && i <= 31 {
+                f = (D & B) | ((!D) & C);
+                g = (5 * i + 1) % 16;
+            } else if 32 <= i && i <= 47 {
+                f = B ^ C ^ D;
+                g = (3 * i + 5) % 16;
+            } else if 48 <= i && i <= 63 {
+                f = C ^ (B | (!D));
+                g = (7 * i) % 16;
+            }
+
+            f = f.wrapping_add(A.wrapping_add(Self::K[i as usize].wrapping_add(words[g as usize])));
+            A = D;
+            D = C;
+            C = B;
+            B = B.wrapping_add(f.rotate_left(Self::S[i as usize]));
+        }
+
+        self.a0 = self.a0.wrapping_add(A);
+        self.b0 = self.b0.wrapping_add(B);
+        self.c0 = self.c0.wrapping_add(C);
+        self.d0 = self.d0.wrapping_add(D);
+    }
+}
+
 impl HashFn<64, 16> for Md5 {
     fn new() -> Self {
         Self {
@@ -50,15 +96,48 @@ impl HashFn<64, 16> for Md5 {
 
     /// TODO: Finish this function.
     fn update(&mut self, data: &[u8]) {
+        let data_len = data.len();
+        let mut blocks = 0;
+
         // process complete 512-bit blocks
         for chunk in data.windows(64) {
-            let mut A = self.a0;
-            let mut B = self.b0;
-            let mut C = self.c0;
-            let mut D = self.d0;
+            self.compute(chunk.try_into().unwrap());
+            blocks += 1;
         }
 
-        // process any leftover data
+        println!("Blocks: {blocks}");
+
+        // determine remaining data
+        let data = &data[blocks * 64..];
+
+        if data.len() > 56 {
+            let mut block = [0u8; 64];
+
+            block[0..data.len()].copy_from_slice(data);
+            block[data.len()] = 0x80;
+
+            self.compute(&block);
+
+            // compute padding block
+            let mut block = [0u8; 64];
+
+            block[56..64].copy_from_slice(&data_len.to_le_bytes());
+
+            self.compute(&block);
+        } else {
+            let mut block = [0u8; 64];
+
+            println!("Remaining: {}", data.len());
+
+            block[0..data.len()].copy_from_slice(data);
+            block[data.len()] = 0x80;
+
+            block[56..64].copy_from_slice(&data_len.to_le_bytes());
+
+            println!("{block:?}");
+
+            self.compute(&block);
+        }
     }
 
     fn finalize(self) -> Hash<16> {
@@ -87,5 +166,20 @@ impl HashFn<64, 16> for Md5 {
         self.d0 = Self::D0;
 
         hash
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use hex::ToHex;
+
+    #[test]
+    fn test_hash() {
+        let input = String::from("Hello, world!").into_bytes();
+        let hash = Md5::hash(&input);
+
+        println!("Hash: {}", hash.encode_hex::<String>());
     }
 }
