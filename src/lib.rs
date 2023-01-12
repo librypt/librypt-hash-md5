@@ -4,7 +4,9 @@ use librypt_hash::{Hash, HashFn};
 ///
 /// WARNING: MD5 is [cryptographically broken and unsuitable for further use](https://www.kb.cert.org/vuls/id/836068).
 pub struct Md5 {
+    total: u64,
     state: [u32; 4],
+    buffer: (usize, [u8; 64]),
 }
 
 impl Md5 {
@@ -31,8 +33,9 @@ impl Md5 {
 }
 
 impl Md5 {
-    /// Expects a chunk of exactly 512-bits (64 bytes).
-    fn compute(&mut self, chunk: &[u8; 64]) {
+    fn compute(&mut self) {
+        let chunk = &self.buffer.1;
+
         let mut state = self.state;
         let mut words = [0u32; 16];
 
@@ -41,8 +44,8 @@ impl Md5 {
         }
 
         for i in 0..64 {
-            let mut f = 0u32;
-            let mut g = 0u32;
+            let mut f;
+            let g;
 
             if i < 16 {
                 f = (state[1] & state[2]) | ((!state[1]) & state[3]);
@@ -61,65 +64,69 @@ impl Md5 {
             f = f
                 .wrapping_add(state[0])
                 .wrapping_add(Self::K[i as usize])
-                .wrapping_add(words[g as usize]);
+                .wrapping_add(words[g as usize])
+                .rotate_left(Self::S[i as usize]);
 
             state[0] = state[3];
             state[3] = state[2];
             state[2] = state[1];
-            state[1] = state[1].wrapping_add(f.rotate_left(Self::S[i as usize]));
+            state[1] = state[1].wrapping_add(f);
         }
 
         for i in 0..4 {
             self.state[i] = self.state[i].wrapping_add(state[i]);
         }
     }
+
+    fn compute_padded(&mut self) {
+        self.buffer.1[self.buffer.0] = 0x80;
+
+        if self.buffer.0 > 55 {
+            for i in self.buffer.0 + 1..64 {
+                self.buffer.1[i] = 0;
+            }
+
+            self.compute();
+
+            self.buffer.0 = 0;
+        }
+
+        for i in self.buffer.0 + 1..56 {
+            self.buffer.1[i] = 0;
+        }
+
+        self.buffer.1[56..64].copy_from_slice(&(self.total * 8).to_le_bytes());
+
+        self.compute();
+    }
 }
 
 impl HashFn<64, 16> for Md5 {
     fn new() -> Self {
-        Self { state: Self::STATE }
-    }
-
-    fn update(&mut self, data: &[u8]) {
-        // compute the amount of blocks
-        let blocks = (data.len() + 8) / 64 + 1;
-
-        // process all 512-bit blocks
-        for i in 0..blocks {
-            let i = i * 64;
-
-            let slice = &data[i.min(data.len())..(i + 64).min(data.len())];
-            let mut block = [0u8; 64];
-
-            // block is exactly 512 bits
-            if slice.len() == 64 {
-                block.copy_from_slice(slice.try_into().unwrap());
-            }
-            // block is less than 512 bits but greater than 440 bits
-            else if slice.len() > 55 {
-                block[..slice.len()].copy_from_slice(slice.try_into().unwrap());
-
-                // add the magic bit
-                block[slice.len()] = 0x80;
-            }
-            // block is less than 440 bits
-            else {
-                block[..slice.len()].copy_from_slice(slice.try_into().unwrap());
-
-                // if the remaining data ends in this block, add the magic bit
-                if i <= data.len() {
-                    block[slice.len()] = 0x80;
-                }
-
-                // add the full data length in bits to the end
-                block[56..64].copy_from_slice(&(data.len() * 8).to_le_bytes());
-            }
-
-            self.compute(&block);
+        Self {
+            total: 0,
+            state: Self::STATE,
+            buffer: (0, [0u8; 64]),
         }
     }
 
-    fn finalize(self) -> Hash<16> {
+    fn update(&mut self, data: &[u8]) {
+        self.total += data.len() as u64;
+
+        for i in 0..data.len() {
+            self.buffer.1[self.buffer.0] = data[i];
+            self.buffer.0 += 1;
+
+            if self.buffer.0 == 64 {
+                self.compute();
+                self.buffer.0 = 0;
+            }
+        }
+    }
+
+    fn finalize(mut self) -> Hash<16> {
+        self.compute_padded();
+
         let mut hash = [0u8; 16];
 
         for i in 0..4 {
@@ -130,6 +137,8 @@ impl HashFn<64, 16> for Md5 {
     }
 
     fn finalize_reset(&mut self) -> Hash<16> {
+        self.compute_padded();
+
         let mut hash = [0u8; 16];
 
         for i in 0..4 {
@@ -137,7 +146,9 @@ impl HashFn<64, 16> for Md5 {
         }
 
         // reset state
+        self.total = 0;
         self.state = Self::STATE;
+        self.buffer = (0, [0u8; 64]);
 
         hash
     }
@@ -153,6 +164,9 @@ mod tests {
     fn test_hash() {
         let hash = Md5::hash(b"Hello, world!");
 
-        println!("Hash: {}", hash.encode_hex::<String>());
+        assert_eq!(
+            hash.encode_hex::<String>(),
+            "6cd3556deb0da54bca060b4c39479839"
+        );
     }
 }
